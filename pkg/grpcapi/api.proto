@@ -5,14 +5,16 @@ package grpcapi;
 option go_package = "github.com/srishtea-22/TaskMaster/pkg/grpcapi";
 
 service WorkerService {
-  rpc SendTask (TaskRequest) returns (TaskResponse) {}
+  rpc SubmitTask (TaskRequest) returns (TaskResponse) {}
 }
 
 message TaskRequest {
-  string data = 1;
+  string task_id = 1;
+  string data = 2;
 }
 
 message TaskResponse {
-  string result = 1;
-  bool success = 2;
+  string task_id = 1;
+  string message = 2;
+  bool success = 3;
 }

@@ -10,5 +10,4 @@ func main() {
 	srv := server.NewServer()
 	fmt.Println("Starting server")
 	srv.Start()
-	fmt.Println("Stopping server")
 }

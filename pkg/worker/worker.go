@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-type workerServer struct {
+type WorkerServer struct {
 	listener     net.Listener
 	workerServer *grpc.Server
 }
@@ -19,11 +19,11 @@ type workerServiceServer struct {
 	pb.UnimplementedWorkerServiceServer
 }
 
-func (s *workerServiceServer) SendTask(ctx context.Context, in *pb.TaskRequest) (*pb.TaskResponse, error) {
+func (s *workerServiceServer) SubmitTask(ctx context.Context, in *pb.TaskRequest) (*pb.TaskResponse, error) {
 	log.Printf("Recieved %v", in.GetData())
 
-	s.processTask(in.GetData())
-	return &pb.TaskResponse{Result: "Task processed"}, nil
+	go s.processTask(in.GetData())
+	return &pb.TaskResponse{Message: "Task was submitted", Success: true, TaskId: in.TaskId}, nil
 }
 
 func (s *workerServiceServer) processTask(data string) {
@@ -32,11 +32,12 @@ func (s *workerServiceServer) processTask(data string) {
 	log.Println("Completed Task", data)
 }
 
-func (w *workerServer) Start() {
+func (w *WorkerServer) Start() error {
 	PORT := ":50051"
 	lis, err := net.Listen("tcp", PORT)
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		log.Printf("Failed to listen: %v", err)
+		return err
 	}
 
 	log.Println("Started server at", PORT)
@@ -44,10 +45,24 @@ func (w *workerServer) Start() {
 	w.workerServer = grpc.NewServer()
 	pb.RegisterWorkerServiceServer(w.workerServer, &workerServiceServer{})
 	if err := w.workerServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to server: %v", err)
+		log.Printf("Failed to serve: %v", err)
+		return err
 	}
+	return nil
 }
 
-func NewServer() workerServer {
-	return workerServer{}
+func (w *WorkerServer) Stop() error {
+	w.workerServer.GracefulStop()
+
+	if err := w.listener.Close(); err != nil {
+		log.Printf("Failed to close listener %v", err)
+		return err
+	}
+
+	log.Println("Worker server stopped")
+	return nil
+}
+
+func NewServer() *WorkerServer {
+	return &WorkerServer{}
 }
