@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/google/uuid"
+	"github.com/srishtea-22/TaskMaster/pkg/common"
 	pb "github.com/srishtea-22/TaskMaster/pkg/grpcapi"
 )
 
@@ -26,7 +27,6 @@ const (
 	httpServerPort   = ":8080"
 	shutdownTimeout  = 5 * time.Second
 	defaultMaxMisses = 2
-	defaultHeartbeat = 5
 )
 
 type CoordinatorServer struct {
@@ -39,7 +39,7 @@ type CoordinatorServer struct {
 	workerPool          map[uint32]*workerInfo
 	mutex               sync.RWMutex
 	maxHeartbeatMisses  uint8
-	heartbeatInterval   uint8
+	heartbeatInterval   time.Duration
 	roundRobinIndex     uint32
 }
 
@@ -54,7 +54,7 @@ func NewServer() *CoordinatorServer {
 	return &CoordinatorServer{
 		workerPool:         make(map[uint32]*workerInfo),
 		maxHeartbeatMisses: defaultMaxMisses,
-		heartbeatInterval:  defaultHeartbeat,
+		heartbeatInterval:  common.DefaultHeartbeat,
 	}
 }
 
@@ -226,7 +226,7 @@ func (s *CoordinatorServer) SendHeartbeat(ctx context.Context, in *pb.HeartbeatR
 }
 
 func (s *CoordinatorServer) manageWorkerPool() {
-	ticker := time.NewTicker(time.Duration(s.heartbeatInterval) * time.Second)
+	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -241,8 +241,8 @@ func (s *CoordinatorServer) removeInactiveWorkers() {
 	for worker_id, worker := range s.workerPool {
 		if worker.heartbeatMisses > s.maxHeartbeatMisses {
 			log.Printf("Removing inactive worker: %d\n", worker_id)
-			delete(s.workerPool, worker_id)
 			worker.grpcConnection.Close()
+			delete(s.workerPool, worker_id)
 		} else {
 			worker.heartbeatMisses++
 		}

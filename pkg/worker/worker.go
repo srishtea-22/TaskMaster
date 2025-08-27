@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/srishtea-22/TaskMaster/pkg/common"
 	pb "github.com/srishtea-22/TaskMaster/pkg/grpcapi"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -15,7 +16,6 @@ import (
 
 const (
 	coordinatorAddress = "localhost:50050"
-	defaultHeartbeat   = 5 * time.Second
 	taskProcessTime    = 5 * time.Second
 	workerPoolSize     = 10
 )
@@ -142,7 +142,7 @@ func NewServer(port string) *WorkerServer {
 	return &WorkerServer{
 		id:                uuid.New().ID(),
 		serverPort:        port,
-		heartbeatInterval: defaultHeartbeat,
+		heartbeatInterval: common.DefaultHeartbeat,
 		taskQueue:         make(chan *pb.TaskRequest, 100),
 	}
 }
