@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	coordinatorAddress = "localhost:50050"
-	taskProcessTime    = 5 * time.Second
-	workerPoolSize     = 5
+	taskProcessTime = 5 * time.Second
+	workerPoolSize  = 5
 )
 
 type WorkerServer struct {
@@ -29,6 +28,7 @@ type WorkerServer struct {
 	heartbeatInterval        time.Duration
 	serverPort               string
 	taskQueue                chan *pb.TaskRequest
+	coordinatorAddress       string
 }
 
 func (w *WorkerServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
@@ -80,7 +80,7 @@ func (w *WorkerServer) worker() {
 
 func (w *WorkerServer) connectToCoordinator() error {
 	log.Println("Connecting to coordinator...")
-	conn, err := grpc.NewClient(coordinatorAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(w.coordinatorAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	if err != nil {
 		return err
@@ -147,11 +147,12 @@ func (w *WorkerServer) closeGRPCConnection() {
 	}
 }
 
-func NewServer(port string) *WorkerServer {
+func NewServer(port string, coordinator string) *WorkerServer {
 	return &WorkerServer{
-		id:                uuid.New().ID(),
-		serverPort:        port,
-		heartbeatInterval: common.DefaultHeartbeat,
-		taskQueue:         make(chan *pb.TaskRequest, 100),
+		id:                 uuid.New().ID(),
+		serverPort:         port,
+		heartbeatInterval:  common.DefaultHeartbeat,
+		taskQueue:          make(chan *pb.TaskRequest, 100),
+		coordinatorAddress: coordinator,
 	}
 }

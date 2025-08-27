@@ -1,13 +1,16 @@
 package main
 
 import (
-	"fmt"
+	"flag"
 
 	"github.com/srishtea-22/TaskMaster/pkg/server"
 )
 
+var serverPort = flag.String("server_port", ":50050", "Port on which coordinator serves requests.")
+
 func main() {
-	srv := server.NewServer(":50050")
-	fmt.Println("Starting server")
-	srv.Start()
+	flag.Parse()
+
+	coordinator := server.NewServer(*serverPort)
+	coordinator.Start()
 }
