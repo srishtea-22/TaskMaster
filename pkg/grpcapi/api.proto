@@ -4,6 +4,13 @@ package grpcapi;
 
 option go_package = "github.com/srishtea-22/TaskMaster/pkg/grpcapi";
 
+enum TaskStatus {
+  QUEUED = 0;
+  PROCESSING = 1;
+  COMPLETE = 2;
+  FAILED = 3;
+}
+
 service WorkerService {
   rpc SubmitTask (TaskRequest) returns (TaskResponse) {}
 }
@@ -20,7 +27,19 @@ message TaskResponse {
 }
 
 service CoordinatorService {
+  rpc SubmitTask (ClientTaskRequest) returns (ClientTaskResponse) {}
   rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse) {}
+  rpc UpdateTaskStatus (UpdateTaskStatusRequest) returns (UpdateTaskStatusResponse) {}
+  rpc GetTaskStatus (GetTaskStatusRequest) returns (GetTaskStatusResponse) {}
+}
+
+message ClientTaskRequest {
+  string data = 1;
+}
+
+message ClientTaskResponse {
+  string message = 2;
+  string task_id = 3;
 }
 
 message HeartbeatRequest {
@@ -30,4 +49,22 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   bool acknowledged = 1;
+}
+
+message UpdateTaskStatusRequest {
+  string task_id = 1;
+  TaskStatus status = 2;
+}
+
+message UpdateTaskStatusResponse {
+  bool success = 1;
+}
+
+message GetTaskStatusRequest {
+  string task_id = 1;
+}
+
+message GetTaskStatusResponse {
+  string task_id = 1;
+  TaskStatus status = 2;
 }

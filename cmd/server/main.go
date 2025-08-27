@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	srv := server.NewServer()
+	srv := server.NewServer(":50050")
 	fmt.Println("Starting server")
 	srv.Start()
 }

@@ -17,7 +17,7 @@ import (
 const (
 	coordinatorAddress = "localhost:50050"
 	taskProcessTime    = 5 * time.Second
-	workerPoolSize     = 10
+	workerPoolSize     = 5
 )
 
 type WorkerServer struct {
@@ -32,16 +32,21 @@ type WorkerServer struct {
 }
 
 func (w *WorkerServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
-	log.Printf("Recieved task: %s", req.GetData())
+	log.Printf("Recieved task: %+v", req)
 
-	go processTask(req.GetData())
+	w.taskQueue <- req
 	return &pb.TaskResponse{Message: "Task was submitted", Success: true, TaskId: req.TaskId}, nil
 }
 
-func processTask(data string) {
-	log.Printf("Processing Task: %s", data)
+func (w *WorkerServer) processTask(task *pb.TaskRequest) {
+	log.Printf("Processing Task: %+v", task)
 	time.Sleep(taskProcessTime)
-	log.Println("Completed Task", data)
+	log.Printf("Completed Task: %+v", task)
+
+	w.coordinatorServiceClient.UpdateTaskStatus(context.Background(), &pb.UpdateTaskStatusRequest{
+		TaskId: task.GetTaskId(),
+		Status: pb.TaskStatus_COMPLETE,
+	})
 }
 
 func (w *WorkerServer) Start() error {
@@ -65,7 +70,11 @@ func (w *WorkerServer) startWorkerPool(numWorkers int) {
 
 func (w *WorkerServer) worker() {
 	for task := range w.taskQueue {
-		processTask(task.GetData())
+		w.coordinatorServiceClient.UpdateTaskStatus(context.Background(), &pb.UpdateTaskStatusRequest{
+			TaskId: task.GetTaskId(),
+			Status: pb.TaskStatus_PROCESSING,
+		})
+		w.processTask(task)
 	}
 }
 
