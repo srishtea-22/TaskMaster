@@ -18,3 +18,16 @@ message TaskResponse {
   string message = 2;
   bool success = 3;
 }
+
+service CoordinatorService {
+  rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse) {}
+}
+
+message HeartbeatRequest {
+  uint32 worker_id = 1;
+  string address = 2;
+}
+
+message HeartbeatResponse {
+  bool acknowledged = 1;
+}

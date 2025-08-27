@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,86 +21,132 @@ import (
 	pb "github.com/srishtea-22/TaskMaster/pkg/grpcapi"
 )
 
-type Server struct {
+const (
+	serverPort       = ":50050"
+	httpServerPort   = ":8080"
+	shutdownTimeout  = 5 * time.Second
+	defaultMaxMisses = 2
+	defaultHeartbeat = 5
+)
+
+type CoordinatorServer struct {
+	pb.UnimplementedCoordinatorServiceServer
 	grpcConnection      *grpc.ClientConn
 	workerServiceClient pb.WorkerServiceClient
+	grpcSever           *grpc.Server
 	httpServer          *http.Server
+	listener            net.Listener
+	workerPool          map[uint32]*workerInfo
+	mutex               sync.RWMutex
+	maxHeartbeatMisses  uint8
+	heartbeatInterval   uint8
+	roundRobinIndex     uint32
 }
 
-func NewServer() *Server {
-	return &Server{}
+type workerInfo struct {
+	heartbeatMisses     uint8
+	address             string
+	grpcConnection      *grpc.ClientConn
+	workerServiceClient pb.WorkerServiceClient
 }
 
-func (s *Server) Start() error {
-	if err := s.setUpGRPCConnection(); err != nil {
-		return err
+func NewServer() *CoordinatorServer {
+	return &CoordinatorServer{
+		workerPool:         make(map[uint32]*workerInfo),
+		maxHeartbeatMisses: defaultMaxMisses,
+		heartbeatInterval:  defaultHeartbeat,
 	}
+}
 
-	defer s.grpcConnection.Close()
+func (s *CoordinatorServer) Start() error {
+	go s.manageWorkerPool()
 
 	if err := s.startHTTPserver(); err != nil {
-		return err
+		return fmt.Errorf("HTTP server failed to start: %w", err)
+	}
+
+	if err := s.startGRPCServer(); err != nil {
+		return fmt.Errorf("gRPC server failed to start: %w", err)
 	}
 
 	return s.awaitShutdown()
 }
 
-func (s *Server) setUpGRPCConnection() error {
-	log.Println("Connecting to worker...")
-	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+func (s *CoordinatorServer) startHTTPserver() error {
+	s.httpServer = &http.Server{Addr: httpServerPort, Handler: http.HandlerFunc(s.handleTaskRequest)}
 
-	if err != nil {
-		return fmt.Errorf("failed to connect with worker %w", err)
-	}
-
-	s.grpcConnection = conn
-	s.workerServiceClient = pb.NewWorkerServiceClient(s.grpcConnection)
-	log.Println("Connected to worker!")
-	return nil
-}
-
-func (s *Server) startHTTPserver() error {
-	s.httpServer = &http.Server{Addr: ":8080", Handler: nil}
-	http.HandleFunc("/", s.handleTaskRequest)
-
-	errChan := make(chan error, 1)
 	go func() {
-		log.Println("Starting HTTP server at :8080")
+		log.Printf("Starting HTTP server at :%s", httpServerPort)
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("failed to start HTTP server: %w", err)
+			log.Fatalf("HTTP server failed: %v", err)
 		}
 	}()
 
-	select {
-	case err := <-errChan:
-		return err
-	default:
-		return nil
-	}
+	return nil
 }
 
-func (s *Server) awaitShutdown() error {
+func (s *CoordinatorServer) startGRPCServer() error {
+	var err error
+	s.listener, err = net.Listen("tcp", serverPort)
+
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Starting grpc server on %s", serverPort)
+	s.grpcSever = grpc.NewServer()
+	pb.RegisterCoordinatorServiceServer(s.grpcSever, s)
+
+	go func() {
+		if err := s.grpcSever.Serve(s.listener); err != nil {
+			log.Fatalf("gRPC server failed: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+func (s *CoordinatorServer) awaitShutdown() error {
 	stop := make(chan os.Signal, 1)
 
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	<-stop
-	return s.shutdownHTTPserver()
+	return s.Stop()
 }
 
-func (s *Server) shutdownHTTPserver() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *CoordinatorServer) Stop() error {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	if err := s.httpServer.Shutdown(ctx); err != nil {
-		return fmt.Errorf("failed to gracefully shutfdown server %w", err)
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			return fmt.Errorf("HTTP server shutdown failed: %w", err)
+		}
 	}
+
+	s.mutex.Lock()
+	for _, worker := range s.workerPool {
+		if worker.grpcConnection != nil {
+			worker.grpcConnection.Close()
+		}
+	}
+	s.mutex.Unlock()
+
+	if s.grpcSever != nil {
+		s.grpcSever.GracefulStop()
+	}
+
+	if s.listener != nil {
+		s.listener.Close()
+	}
+
 	return nil
 }
 
-func (s *Server) handleTaskRequest(w http.ResponseWriter, r *http.Request) {
+func (s *CoordinatorServer) handleTaskRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid method request", http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -113,34 +162,93 @@ func (s *Server) handleTaskRequest(w http.ResponseWriter, r *http.Request) {
 		Data:   string(body),
 	}
 
-	if err = s.submitTask(task); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := s.submitTask(task); err != nil {
+		http.Error(w, fmt.Sprintf("Task submission failed: %s", err), http.StatusInternalServerError)
 		return
 	}
 
 	fmt.Fprintf(w, "Task submitted")
 }
 
-func (s *Server) submitTask(task *pb.TaskRequest) error {
-	_, err := s.workerServiceClient.SubmitTask(context.Background(), task)
+func (s *CoordinatorServer) getNextWorker() *workerInfo {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
-	if err != nil {
-		return fmt.Errorf("error submitting task: %w", err)
+	workerCount := len(s.workerPool)
+	if workerCount == 0 {
+		return nil
 	}
 
-	return nil
+	keys := make([]uint32, 0, workerCount)
+	for k := range s.workerPool {
+		keys = append(keys, k)
+	}
+
+	worker := s.workerPool[s.roundRobinIndex%uint32(workerCount)]
+	s.roundRobinIndex++
+	return worker
 }
 
-func (s *Server) Stop() error {
-	if s.httpServer != nil {
-		if err := s.shutdownHTTPserver(); err != nil {
-			return err
+func (s *CoordinatorServer) submitTask(task *pb.TaskRequest) error {
+	worker := s.getNextWorker()
+	if worker == nil {
+		return errors.New("no workers available")
+	}
+
+	_, err := worker.workerServiceClient.SubmitTask(context.Background(), task)
+	return err
+}
+
+func (s *CoordinatorServer) SendHeartbeat(ctx context.Context, in *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	worker_id := in.GetWorkerId()
+	log.Println("Recieved heartbeat from worker: ", worker_id)
+
+	if worker, ok := s.workerPool[worker_id]; ok {
+		worker.heartbeatMisses = 0
+	} else {
+		log.Println("Registering worker: ", worker_id)
+		conn, err := grpc.NewClient(in.GetAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, err
+		}
+
+		s.workerPool[worker_id] = &workerInfo{
+			address:             in.GetAddress(),
+			grpcConnection:      conn,
+			workerServiceClient: pb.NewWorkerServiceClient(conn),
+		}
+		log.Println("Registered worker: ", worker_id)
+	}
+
+	return &pb.HeartbeatResponse{Acknowledged: true}, nil
+}
+
+func (s *CoordinatorServer) manageWorkerPool() {
+	ticker := time.NewTicker(time.Duration(s.heartbeatInterval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.removeInactiveWorkers()
 		}
 	}
+}
 
-	if s.grpcConnection != nil {
-		s.grpcConnection.Close()
+func (s *CoordinatorServer) removeInactiveWorkers() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for worker_id, worker := range s.workerPool {
+		if worker.heartbeatMisses > s.maxHeartbeatMisses {
+			log.Printf("Removing inactive worker: %d\n", worker_id)
+			delete(s.workerPool, worker_id)
+			worker.grpcConnection.Close()
+		} else {
+			worker.heartbeatMisses++
+		}
 	}
-
-	return nil
 }

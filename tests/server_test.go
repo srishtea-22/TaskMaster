@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var s *server.Server
+var s *server.CoordinatorServer
 var w *worker.WorkerServer
 
 func TestMain(m *testing.M) {
