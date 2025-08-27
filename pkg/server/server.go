@@ -76,7 +76,7 @@ func (s *CoordinatorServer) startHTTPserver() error {
 	s.httpServer = &http.Server{Addr: httpServerPort, Handler: http.HandlerFunc(s.handleTaskRequest)}
 
 	go func() {
-		log.Printf("Starting HTTP server at :%s", httpServerPort)
+		log.Printf("Starting HTTP server at %s", httpServerPort)
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatalf("HTTP server failed: %v", err)
 		}
@@ -183,10 +183,9 @@ func (s *CoordinatorServer) getNextWorker() *workerInfo {
 	for k := range s.workerPool {
 		keys = append(keys, k)
 	}
-
-	worker := s.workerPool[s.roundRobinIndex%uint32(workerCount)]
+	key := keys[s.roundRobinIndex%uint32(workerCount)]
 	s.roundRobinIndex++
-	return worker
+	return s.workerPool[key]
 }
 
 func (s *CoordinatorServer) submitTask(task *pb.TaskRequest) error {
@@ -230,11 +229,8 @@ func (s *CoordinatorServer) manageWorkerPool() {
 	ticker := time.NewTicker(time.Duration(s.heartbeatInterval) * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			s.removeInactiveWorkers()
-		}
+	for range ticker.C {
+		s.removeInactiveWorkers()
 	}
 }
 

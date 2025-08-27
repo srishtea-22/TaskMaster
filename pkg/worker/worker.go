@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	serverPort         = ":50051"
 	coordinatorAddress = "localhost:50050"
 	defaultHeartbeat   = 5 * time.Second
 	taskProcessTime    = 5 * time.Second
+	workerPoolSize     = 10
 )
 
 type WorkerServer struct {
@@ -27,6 +27,8 @@ type WorkerServer struct {
 	id                       uint32
 	coordinatorServiceClient pb.CoordinatorServiceClient
 	heartbeatInterval        time.Duration
+	serverPort               string
+	taskQueue                chan *pb.TaskRequest
 }
 
 func (w *WorkerServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
@@ -43,6 +45,8 @@ func processTask(data string) {
 }
 
 func (w *WorkerServer) Start() error {
+	w.startWorkerPool(workerPoolSize)
+
 	if err := w.connectToCoordinator(); err != nil {
 		return fmt.Errorf("failed to connect to coordinator: %w", err)
 	}
@@ -51,6 +55,18 @@ func (w *WorkerServer) Start() error {
 	go w.periodicHeartbeat()
 
 	return w.startGRPCServer()
+}
+
+func (w *WorkerServer) startWorkerPool(numWorkers int) {
+	for range numWorkers {
+		go w.worker()
+	}
+}
+
+func (w *WorkerServer) worker() {
+	for task := range w.taskQueue {
+		processTask(task.GetData())
+	}
 }
 
 func (w *WorkerServer) connectToCoordinator() error {
@@ -87,13 +103,13 @@ func (w *WorkerServer) sendHeartbeat() error {
 
 func (w *WorkerServer) startGRPCServer() error {
 	var err error
-	w.listener, err = net.Listen("tcp", serverPort)
+	w.listener, err = net.Listen("tcp", w.serverPort)
 
 	if err != nil {
-		return fmt.Errorf("failed to listen to %s: %v", serverPort, err)
+		return fmt.Errorf("failed to listen to %s: %v", w.serverPort, err)
 	}
 
-	log.Printf("Starting worker server at %s", serverPort)
+	log.Printf("Starting worker server at %s", w.serverPort)
 	w.grpcServer = grpc.NewServer()
 	pb.RegisterWorkerServiceServer(w.grpcServer, w)
 
@@ -103,6 +119,7 @@ func (w *WorkerServer) startGRPCServer() error {
 func (w *WorkerServer) Stop() error {
 	if w.grpcServer != nil {
 		w.grpcServer.GracefulStop()
+		w.listener = nil
 	}
 
 	if w.listener != nil {
@@ -111,7 +128,7 @@ func (w *WorkerServer) Stop() error {
 		}
 	}
 
-	log.Println("Worker server stopped")
+	log.Printf("Worker server at %d stopped", w.id)
 	return nil
 }
 
@@ -121,9 +138,11 @@ func (w *WorkerServer) closeGRPCConnection() {
 	}
 }
 
-func NewServer() *WorkerServer {
+func NewServer(port string) *WorkerServer {
 	return &WorkerServer{
 		id:                uuid.New().ID(),
+		serverPort:        port,
 		heartbeatInterval: defaultHeartbeat,
+		taskQueue:         make(chan *pb.TaskRequest, 100),
 	}
 }

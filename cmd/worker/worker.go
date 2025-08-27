@@ -5,6 +5,6 @@ import (
 )
 
 func main() {
-	workerServer := worker.NewServer()
+	workerServer := worker.NewServer(":50051")
 	workerServer.Start()
 }
