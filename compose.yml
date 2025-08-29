@@ -1,0 +1,16 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server-dockerfile
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker-dockerfile
+    environment:
+      - WORKER_ADDRESS=worker
+    depends_on:
+      - server

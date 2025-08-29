@@ -19,7 +19,6 @@ import (
 var coordinator *server.CoordinatorServer
 var w1 *worker.WorkerServer
 var w2 *worker.WorkerServer
-var conn *grpc.ClientConn
 var client pb.CoordinatorServiceClient
 
 func TestMain(m *testing.M) {
@@ -31,7 +30,7 @@ func TestMain(m *testing.M) {
 
 func setup() {
 	coordinator = server.NewServer(":50050")
-	w1 = worker.NewServer(":50051", "localhost:50050")
+	w1 = worker.NewServer("", "localhost:50050")
 	w2 = worker.NewServer(":50052", "localhost:50050")
 
 	startServers()

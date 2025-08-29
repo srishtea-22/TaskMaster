@@ -1,0 +1,25 @@
+FROM golang:1.25
+
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    git
+
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+
+RUN go mod download
+
+COPY pkg/ ./pkg/
+COPY cmd/server/main.go .
+
+RUN bash ./pkg/grpcapi/build.sh
+
+RUN go build -o server main.go
+
+EXPOSE 8080
+
+CMD ./server --server_port=:8080

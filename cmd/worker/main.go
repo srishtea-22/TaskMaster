@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	serverPort      = flag.String("worker_port", ":50051", "Port on which worker serves requests.")
-	coordinatorPort = flag.String("coordinator_port", "50050", "Network address of coordinator")
+	serverPort      = flag.String("worker_port", "", "Port on which worker serves requests.")
+	coordinatorPort = flag.String("coordinator", ":8080", "Network address of coordinator")
 )
 
 func main() {

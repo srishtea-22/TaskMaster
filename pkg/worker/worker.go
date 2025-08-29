@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -103,16 +104,26 @@ func (w *WorkerServer) periodicHeartbeat() {
 }
 
 func (w *WorkerServer) sendHeartbeat() error {
+	workerAddress := os.Getenv("WORKER_ADDRESS")
+	if workerAddress == "" {
+		workerAddress = w.listener.Addr().String()
+	}
 	_, err := w.coordinatorServiceClient.SendHeartbeat(context.Background(), &pb.HeartbeatRequest{
 		WorkerId: w.id,
-		Address:  w.listener.Addr().String(),
+		Address:  workerAddress + w.serverPort,
 	})
 	return err
 }
 
 func (w *WorkerServer) startGRPCServer() error {
 	var err error
-	w.listener, err = net.Listen("tcp", w.serverPort)
+
+	if w.serverPort == "" {
+		w.listener, err = net.Listen("tcp", ":0")
+		w.serverPort = fmt.Sprintf("%d", w.listener.Addr().(*net.TCPAddr).Port)
+	} else {
+		w.listener, err = net.Listen("tcp", w.serverPort)
+	}
 
 	if err != nil {
 		return fmt.Errorf("failed to listen to %s: %v", w.serverPort, err)
