@@ -107,10 +107,12 @@ func (w *WorkerServer) sendHeartbeat() error {
 	workerAddress := os.Getenv("WORKER_ADDRESS")
 	if workerAddress == "" {
 		workerAddress = w.listener.Addr().String()
+	} else {
+		workerAddress = workerAddress + w.serverPort
 	}
 	_, err := w.coordinatorServiceClient.SendHeartbeat(context.Background(), &pb.HeartbeatRequest{
 		WorkerId: w.id,
-		Address:  workerAddress + w.serverPort,
+		Address:  workerAddress,
 	})
 	return err
 }
@@ -137,10 +139,7 @@ func (w *WorkerServer) startGRPCServer() error {
 }
 
 func (w *WorkerServer) Stop() error {
-	if w.grpcServer != nil {
-		w.grpcServer.GracefulStop()
-		w.listener = nil
-	}
+	w.closeGRPCConnection()
 
 	if w.listener != nil {
 		if err := w.listener.Close(); err != nil {

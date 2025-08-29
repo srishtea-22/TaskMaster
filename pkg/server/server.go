@@ -30,8 +30,8 @@ type CoordinatorServer struct {
 	grpcConnection     *grpc.ClientConn
 	grpcSever          *grpc.Server
 	listener           net.Listener
-	workerPool         map[uint32]*workerInfo
-	workerPoolMutex    sync.RWMutex
+	WorkerPool         map[uint32]*workerInfo
+	WorkerPoolMutex    sync.RWMutex
 	maxHeartbeatMisses uint8
 	heartbeatInterval  time.Duration
 	roundRobinIndex    uint32
@@ -49,7 +49,7 @@ type workerInfo struct {
 
 func NewServer(port string) *CoordinatorServer {
 	return &CoordinatorServer{
-		workerPool:         make(map[uint32]*workerInfo),
+		WorkerPool:         make(map[uint32]*workerInfo),
 		TaskStatus:         make(map[string]pb.TaskStatus),
 		maxHeartbeatMisses: defaultMaxMisses,
 		heartbeatInterval:  common.DefaultHeartbeat,
@@ -98,13 +98,13 @@ func (s *CoordinatorServer) awaitShutdown() error {
 }
 
 func (s *CoordinatorServer) Stop() error {
-	s.workerPoolMutex.Lock()
-	for _, worker := range s.workerPool {
+	s.WorkerPoolMutex.Lock()
+	for _, worker := range s.WorkerPool {
 		if worker.grpcConnection != nil {
 			worker.grpcConnection.Close()
 		}
 	}
-	s.workerPoolMutex.Unlock()
+	s.WorkerPoolMutex.Unlock()
 
 	if s.grpcSever != nil {
 		s.grpcSever.GracefulStop()
@@ -155,21 +155,21 @@ func (s *CoordinatorServer) UpdateTaskStatus(ctx context.Context, req *pb.Update
 }
 
 func (s *CoordinatorServer) getNextWorker() *workerInfo {
-	s.workerPoolMutex.RLock()
-	defer s.workerPoolMutex.RUnlock()
+	s.WorkerPoolMutex.RLock()
+	defer s.WorkerPoolMutex.RUnlock()
 
-	workerCount := len(s.workerPool)
+	workerCount := len(s.WorkerPool)
 	if workerCount == 0 {
 		return nil
 	}
 
 	keys := make([]uint32, 0, workerCount)
-	for k := range s.workerPool {
+	for k := range s.WorkerPool {
 		keys = append(keys, k)
 	}
 	key := keys[s.roundRobinIndex%uint32(workerCount)]
 	s.roundRobinIndex++
-	return s.workerPool[key]
+	return s.WorkerPool[key]
 }
 
 func (s *CoordinatorServer) GetTaskStatus(ctx context.Context, in *pb.GetTaskStatusRequest) (*pb.GetTaskStatusResponse, error) {
@@ -195,13 +195,13 @@ func (s *CoordinatorServer) submitTaskToWorker(task *pb.TaskRequest) error {
 }
 
 func (s *CoordinatorServer) SendHeartbeat(ctx context.Context, in *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
-	s.workerPoolMutex.Lock()
-	defer s.workerPoolMutex.Unlock()
+	s.WorkerPoolMutex.Lock()
+	defer s.WorkerPoolMutex.Unlock()
 
 	worker_id := in.GetWorkerId()
 	log.Println("Recieved heartbeat from worker: ", worker_id)
 
-	if worker, ok := s.workerPool[worker_id]; ok {
+	if worker, ok := s.WorkerPool[worker_id]; ok {
 		worker.heartbeatMisses = 0
 	} else {
 		log.Println("Registering worker: ", worker_id)
@@ -210,7 +210,7 @@ func (s *CoordinatorServer) SendHeartbeat(ctx context.Context, in *pb.HeartbeatR
 			return nil, err
 		}
 
-		s.workerPool[worker_id] = &workerInfo{
+		s.WorkerPool[worker_id] = &workerInfo{
 			address:             in.GetAddress(),
 			grpcConnection:      conn,
 			workerServiceClient: pb.NewWorkerServiceClient(conn),
@@ -231,14 +231,14 @@ func (s *CoordinatorServer) manageWorkerPool() {
 }
 
 func (s *CoordinatorServer) removeInactiveWorkers() {
-	s.workerPoolMutex.Lock()
-	defer s.workerPoolMutex.Unlock()
+	s.WorkerPoolMutex.Lock()
+	defer s.WorkerPoolMutex.Unlock()
 
-	for worker_id, worker := range s.workerPool {
+	for worker_id, worker := range s.WorkerPool {
 		if worker.heartbeatMisses > s.maxHeartbeatMisses {
 			log.Printf("Removing inactive worker: %d\n", worker_id)
 			worker.grpcConnection.Close()
-			delete(s.workerPool, worker_id)
+			delete(s.WorkerPool, worker_id)
 		} else {
 			worker.heartbeatMisses++
 		}
