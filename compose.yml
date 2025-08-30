@@ -1,8 +1,8 @@
 services:
-  server:
+  coordinator:
     build:
       context: .
-      dockerfile: server-dockerfile
+      dockerfile: coordinator-dockerfile
     ports:
       - "8080:8080"
 
@@ -13,4 +13,4 @@ services:
     environment:
       - WORKER_ADDRESS=worker
     depends_on:
-      - server
+      - coordinator

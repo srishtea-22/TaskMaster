@@ -51,31 +51,37 @@ func (w *WorkerServer) processTask(task *pb.TaskRequest) {
 }
 
 func (w *WorkerServer) Start() error {
-	w.startWorkerPool(workerPoolSize)
+	ctx := context.Background()
+	w.startWorkerPool(ctx, workerPoolSize)
 
 	if err := w.connectToCoordinator(); err != nil {
 		return fmt.Errorf("failed to connect to coordinator: %w", err)
 	}
 	defer w.closeGRPCConnection()
 
-	go w.periodicHeartbeat()
+	go w.periodicHeartbeat(ctx)
 
 	return w.startGRPCServer()
 }
 
-func (w *WorkerServer) startWorkerPool(numWorkers int) {
+func (w *WorkerServer) startWorkerPool(ctx context.Context, numWorkers int) {
 	for range numWorkers {
-		go w.worker()
+		go w.worker(ctx)
 	}
 }
 
-func (w *WorkerServer) worker() {
-	for task := range w.taskQueue {
-		w.coordinatorServiceClient.UpdateTaskStatus(context.Background(), &pb.UpdateTaskStatusRequest{
-			TaskId: task.GetTaskId(),
-			Status: pb.TaskStatus_PROCESSING,
-		})
-		w.processTask(task)
+func (w *WorkerServer) worker(ctx context.Context) {
+	for {
+		select {
+		case task := <-w.taskQueue:
+			w.coordinatorServiceClient.UpdateTaskStatus(context.Background(), &pb.UpdateTaskStatusRequest{
+				TaskId: task.GetTaskId(),
+				Status: pb.TaskStatus_PROCESSING,
+			})
+			w.processTask(task)
+		case<-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -92,13 +98,18 @@ func (w *WorkerServer) connectToCoordinator() error {
 	return nil
 }
 
-func (w *WorkerServer) periodicHeartbeat() {
+func (w *WorkerServer) periodicHeartbeat(ctx context.Context) {
 	ticker := time.NewTicker(w.heartbeatInterval)
+	defer ticker.Stop()
 
-	for range ticker.C {
-		if err := w.sendHeartbeat(); err != nil {
-			log.Printf("Failed to send heartbeat: %v", err)
-			break
+	for {
+		select {
+		case<-ticker.C:
+			if err := w.sendHeartbeat(); err != nil {
+				log.Printf("Failed to send heartbeat: %v", err)
+			}
+		case<-ctx.Done():
+			return
 		}
 	}
 }
@@ -108,7 +119,7 @@ func (w *WorkerServer) sendHeartbeat() error {
 	if workerAddress == "" {
 		workerAddress = w.listener.Addr().String()
 	} else {
-		workerAddress = workerAddress + w.serverPort
+		workerAddress += w.serverPort
 	}
 	_, err := w.coordinatorServiceClient.SendHeartbeat(context.Background(), &pb.HeartbeatRequest{
 		WorkerId: w.id,
@@ -140,12 +151,6 @@ func (w *WorkerServer) startGRPCServer() error {
 
 func (w *WorkerServer) Stop() error {
 	w.closeGRPCConnection()
-
-	if w.listener != nil {
-		if err := w.listener.Close(); err != nil {
-			return fmt.Errorf("failed to close the listener: %w", err)
-		}
-	}
 
 	log.Printf("Worker server at %d stopped", w.id)
 	return nil

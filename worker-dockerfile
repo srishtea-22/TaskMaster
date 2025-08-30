@@ -22,4 +22,4 @@ RUN go build -o worker main.go
 
 EXPOSE 50056
 
-CMD ["./worker", "--coordinator=server:8080"]
+CMD ["./worker", "--coordinator=coordinator:8080"]

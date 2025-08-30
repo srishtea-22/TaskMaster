@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/srishtea-22/TaskMaster/pkg/coordinator"
 	pb "github.com/srishtea-22/TaskMaster/pkg/grpcapi"
-	"github.com/srishtea-22/TaskMaster/pkg/server"
 	"github.com/srishtea-22/TaskMaster/pkg/worker"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -14,13 +14,13 @@ import (
 
 type Cluster struct {
 	coordinaterAddress  string
-	coordinator         *server.CoordinatorServer
+	coordinator         *coordinator.CoordinatorServer
 	workers				[]*worker.WorkerServer
 }
 
 func (c *Cluster) LaunchCluster(coordinatorPort string, numWorkers int8) {
 	c.coordinaterAddress = "localhost" + coordinatorPort
-	c.coordinator = server.NewServer(coordinatorPort)
+	c.coordinator = coordinator.NewServer(coordinatorPort)
 
 	c.workers = make([]*worker.WorkerServer, numWorkers)
 
@@ -62,6 +62,7 @@ func (c *Cluster) waitForWorkers() {
 	for {
 		c.coordinator.WorkerPoolMutex.RLock()
 		if len(c.coordinator.WorkerPool) == 2 {
+			c.coordinator.WorkerPoolMutex.RUnlock()
 			break
 		}
 		c.coordinator.WorkerPoolMutex.RUnlock()

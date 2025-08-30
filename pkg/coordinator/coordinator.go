@@ -1,4 +1,4 @@
-package server
+package coordinator
 
 import (
 	"context"
@@ -21,13 +21,11 @@ import (
 )
 
 const (
-	shutdownTimeout  = 5 * time.Second
 	defaultMaxMisses = 2
 )
 
 type CoordinatorServer struct {
 	pb.UnimplementedCoordinatorServiceServer
-	grpcConnection     *grpc.ClientConn
 	grpcSever          *grpc.Server
 	listener           net.Listener
 	WorkerPool         map[uint32]*workerInfo
@@ -222,7 +220,7 @@ func (s *CoordinatorServer) SendHeartbeat(ctx context.Context, in *pb.HeartbeatR
 }
 
 func (s *CoordinatorServer) manageWorkerPool() {
-	ticker := time.NewTicker(s.heartbeatInterval)
+	ticker := time.NewTicker(time.Duration(s.maxHeartbeatMisses) * s.heartbeatInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {

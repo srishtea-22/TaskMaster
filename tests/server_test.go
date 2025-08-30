@@ -35,7 +35,6 @@ func teardown() {
 }
 
 func TestServerIntegration(t *testing.T) {
-	t.Parallel()
 
 	assertion := assert.New(t)
 
