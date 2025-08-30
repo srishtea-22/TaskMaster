@@ -36,6 +36,9 @@ type CoordinatorServer struct {
 	TaskStatus         map[string]pb.TaskStatus
 	taskStatusMutex    sync.RWMutex
 	serverPort         string
+	ctx				   context.Context
+	cancel 			   context.CancelFunc
+	wg 				   sync.WaitGroup
 }
 
 type workerInfo struct {
@@ -46,12 +49,15 @@ type workerInfo struct {
 }
 
 func NewServer(port string) *CoordinatorServer {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &CoordinatorServer{
 		WorkerPool:         make(map[uint32]*workerInfo),
 		TaskStatus:         make(map[string]pb.TaskStatus),
 		maxHeartbeatMisses: defaultMaxMisses,
 		heartbeatInterval:  common.DefaultHeartbeat,
 		serverPort:         port,
+		ctx: 				ctx,
+		cancel: 			cancel,
 	}
 }
 
@@ -96,6 +102,9 @@ func (s *CoordinatorServer) awaitShutdown() error {
 }
 
 func (s *CoordinatorServer) Stop() error {
+	s.cancel()
+	s.wg.Wait()
+
 	s.WorkerPoolMutex.Lock()
 	for _, worker := range s.WorkerPool {
 		if worker.grpcConnection != nil {
@@ -220,11 +229,19 @@ func (s *CoordinatorServer) SendHeartbeat(ctx context.Context, in *pb.HeartbeatR
 }
 
 func (s *CoordinatorServer) manageWorkerPool() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	ticker := time.NewTicker(time.Duration(s.maxHeartbeatMisses) * s.heartbeatInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.removeInactiveWorkers()
+	for {
+		select {
+		case<-ticker.C:
+			s.removeInactiveWorkers()
+		case<-s.ctx.Done():
+			return
+		}
 	}
 }
 
