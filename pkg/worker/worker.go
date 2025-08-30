@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +31,10 @@ type WorkerServer struct {
 	serverPort               string
 	taskQueue                chan *pb.TaskRequest
 	coordinatorAddress       string
+	coordinatorConnection    *grpc.ClientConn
+	ctx						 context.Context
+	cancel 					 context.CancelFunc
+	wg 						 sync.WaitGroup
 }
 
 func (w *WorkerServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
@@ -51,26 +56,27 @@ func (w *WorkerServer) processTask(task *pb.TaskRequest) {
 }
 
 func (w *WorkerServer) Start() error {
-	ctx := context.Background()
-	w.startWorkerPool(ctx, workerPoolSize)
+	w.startWorkerPool(workerPoolSize)
 
 	if err := w.connectToCoordinator(); err != nil {
 		return fmt.Errorf("failed to connect to coordinator: %w", err)
 	}
 	defer w.closeGRPCConnection()
 
-	go w.periodicHeartbeat(ctx)
+	go w.periodicHeartbeat()
 
 	return w.startGRPCServer()
 }
 
-func (w *WorkerServer) startWorkerPool(ctx context.Context, numWorkers int) {
+func (w *WorkerServer) startWorkerPool(numWorkers int) {
 	for range numWorkers {
-		go w.worker(ctx)
+		w.wg.Add(1)
+		go w.worker()
 	}
 }
 
-func (w *WorkerServer) worker(ctx context.Context) {
+func (w *WorkerServer) worker() {
+	defer w.wg.Done()
 	for {
 		select {
 		case task := <-w.taskQueue:
@@ -79,7 +85,7 @@ func (w *WorkerServer) worker(ctx context.Context) {
 				Status: pb.TaskStatus_PROCESSING,
 			})
 			w.processTask(task)
-		case<-ctx.Done():
+		case<-w.ctx.Done():
 			return
 		}
 	}
@@ -87,18 +93,22 @@ func (w *WorkerServer) worker(ctx context.Context) {
 
 func (w *WorkerServer) connectToCoordinator() error {
 	log.Println("Connecting to coordinator...")
-	conn, err := grpc.NewClient(w.coordinatorAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	var err error
+	w.coordinatorConnection, err = grpc.NewClient(w.coordinatorAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	if err != nil {
 		return err
 	}
 
-	w.coordinatorServiceClient = pb.NewCoordinatorServiceClient(conn)
+	w.coordinatorServiceClient = pb.NewCoordinatorServiceClient(w.coordinatorConnection)
 	log.Println("Connected to coordinator")
 	return nil
 }
 
-func (w *WorkerServer) periodicHeartbeat(ctx context.Context) {
+func (w *WorkerServer) periodicHeartbeat() {
+	w.wg.Add(1)
+	defer w.wg.Done()
+
 	ticker := time.NewTicker(w.heartbeatInterval)
 	defer ticker.Stop()
 
@@ -108,7 +118,7 @@ func (w *WorkerServer) periodicHeartbeat(ctx context.Context) {
 			if err := w.sendHeartbeat(); err != nil {
 				log.Printf("Failed to send heartbeat: %v", err)
 			}
-		case<-ctx.Done():
+		case<-w.ctx.Done():
 			return
 		}
 	}
@@ -150,6 +160,9 @@ func (w *WorkerServer) startGRPCServer() error {
 }
 
 func (w *WorkerServer) Stop() error {
+	w.cancel()
+	w.wg.Wait()
+
 	w.closeGRPCConnection()
 
 	log.Printf("Worker server at %d stopped", w.id)
@@ -160,14 +173,27 @@ func (w *WorkerServer) closeGRPCConnection() {
 	if w.grpcServer != nil {
 		w.grpcServer.GracefulStop()
 	}
+
+	if w.listener != nil {
+		if err := w.listener.Close(); err != nil {
+			log.Printf("Failed to close listener: %v", err)
+		}
+	}
+
+	if err := w.coordinatorConnection.Close(); err != nil {
+		log.Printf("Error while closing client connection to coordinator: %v", err)
+	}
 }
 
 func NewServer(port string, coordinator string) *WorkerServer {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &WorkerServer{
 		id:                 uuid.New().ID(),
 		serverPort:         port,
 		heartbeatInterval:  common.DefaultHeartbeat,
 		taskQueue:          make(chan *pb.TaskRequest, 100),
 		coordinatorAddress: coordinator,
+		ctx: 				ctx,
+		cancel: 			cancel,
 	}
 }
