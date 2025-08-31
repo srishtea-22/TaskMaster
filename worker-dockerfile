@@ -20,6 +20,4 @@ RUN bash ./pkg/grpcapi/build.sh
 
 RUN go build -o worker main.go
 
-EXPOSE 50056
-
 CMD ["./worker", "--coordinator=coordinator:8080"]

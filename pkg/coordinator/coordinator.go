@@ -206,7 +206,7 @@ func (s *CoordinatorServer) SendHeartbeat(ctx context.Context, in *pb.HeartbeatR
 	defer s.WorkerPoolMutex.Unlock()
 
 	worker_id := in.GetWorkerId()
-	log.Println("Recieved heartbeat from worker: ", worker_id)
+	//log.Println("Recieved heartbeat from worker: ", worker_id)
 
 	if worker, ok := s.WorkerPool[worker_id]; ok {
 		worker.heartbeatMisses = 0

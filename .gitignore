@@ -17,3 +17,9 @@
 
 # Go workspace file
 go.work
+
+#env
+*.env
+
+#docker compose volume
+data/

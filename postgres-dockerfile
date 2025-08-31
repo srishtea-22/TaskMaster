@@ -1,0 +1,5 @@
+FROM postgres:14.1
+
+WORKDIR /app
+
+COPY pkg/db/setup.sql /docker-entrypoint.initdb.d/

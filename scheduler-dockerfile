@@ -14,10 +14,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY pkg/ ./pkg/
-COPY cmd/coordinator/main.go .
+COPY cmd/scheduler/main.go .
 
 RUN bash ./pkg/grpcapi/build.sh
 
-RUN go build -o coordinator main.go
+RUN go build -o scheduler main.go
 
-CMD ./coordinator --coordinator_port=:8080
+CMD ["./scheduler", "--scheduler_port=:8081"]
