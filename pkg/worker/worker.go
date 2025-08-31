@@ -25,22 +25,28 @@ const (
 
 type WorkerServer struct {
 	pb.UnimplementedWorkerServiceServer
+	id                       uint32
+	serverPort               string
+	coordinatorAddress       string
 	listener                 net.Listener
 	grpcServer               *grpc.Server
-	id                       uint32
+	coordinatorConnection    *grpc.ClientConn
 	coordinatorServiceClient pb.CoordinatorServiceClient
 	heartbeatInterval        time.Duration
-	serverPort               string
 	taskQueue                chan *pb.TaskRequest
-	coordinatorAddress       string
-	coordinatorConnection    *grpc.ClientConn
-	ctx						 context.Context
-	cancel 					 context.CancelFunc
-	wg 						 sync.WaitGroup
+	ReceivedTasks            map[string]*pb.TaskRequest
+	ReceivedTasksMutex       sync.Mutex
+	ctx                      context.Context
+	cancel                   context.CancelFunc
+	wg                       sync.WaitGroup
 }
 
 func (w *WorkerServer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
 	log.Printf("Recieved task: %+v", req)
+
+	w.ReceivedTasksMutex.Lock()
+	w.ReceivedTasks[req.GetTaskId()] = req
+	w.ReceivedTasksMutex.Unlock()
 
 	w.taskQueue <- req
 	return &pb.TaskResponse{Message: "Task was submitted", Success: true, TaskId: req.TaskId}, nil
@@ -212,6 +218,7 @@ func NewServer(port string, coordinator string) *WorkerServer {
 		serverPort:         port,
 		heartbeatInterval:  common.DefaultHeartbeat,
 		taskQueue:          make(chan *pb.TaskRequest, 100),
+		ReceivedTasks:      make(map[string]*pb.TaskRequest),
 		coordinatorAddress: coordinator,
 		ctx: 				ctx,
 		cancel: 			cancel,
