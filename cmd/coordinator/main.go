@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 
+	"github.com/srishtea-22/TaskMaster/pkg/common"
 	"github.com/srishtea-22/TaskMaster/pkg/coordinator"
 )
 
@@ -11,6 +12,7 @@ var coordinatorPort = flag.String("coordinator_port", ":8080", "Port on which co
 func main() {
 	flag.Parse()
 
-	coordinator := coordinator.NewServer(*coordinatorPort)
+	dbConnectionString := common.GetDBConnectionString()
+	coordinator := coordinator.NewServer(*coordinatorPort, dbConnectionString)
 	coordinator.Start()
 }
