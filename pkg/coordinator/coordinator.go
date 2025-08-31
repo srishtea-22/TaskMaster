@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultMaxMisses = 2
+	defaultMaxMisses = 1
 )
 
 type CoordinatorServer struct {

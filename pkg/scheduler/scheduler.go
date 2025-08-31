@@ -79,6 +79,8 @@ func (s *SchedulerServer) handlePostTask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	log.Printf("Received schedule request: %+v", commandReq)
+
 	scheduledTime, err := time.Parse(time.RFC3339, commandReq.ScheduledAt)
 	if err != nil {
 		http.Error(w, "Invalid date format. Use ISO 8601 format.", http.StatusBadRequest)
@@ -110,6 +112,8 @@ func (s *SchedulerServer) insertTaskIntoDB(ctx context.Context, task Task) (stri
 	if err != nil {
 		return "", err
 	}
+
+	log.Printf("Inserted task %s into DB successfully", insertedId)
 	return insertedId, nil
 }
 
