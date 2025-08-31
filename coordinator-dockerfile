@@ -20,4 +20,4 @@ RUN bash ./pkg/grpcapi/build.sh
 
 RUN go build -o coordinator main.go
 
-CMD ./coordinator --coordinator_port=:8080
+CMD ["./coordinator", "--coordinator_port=:8080"]
